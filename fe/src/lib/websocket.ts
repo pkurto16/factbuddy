@@ -1,4 +1,4 @@
-const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL || "ws://localhost:8000/ws"
+const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL
 
 class WebSocketClient {
     private ws: WebSocket | null = null
