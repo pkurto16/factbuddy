@@ -1,110 +1,125 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { Camera, History, Mic, PauseCircle } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Card } from "@/components/ui/card"
-import { createWebSocketClient } from "@/lib/websocket"
-import { createMediaStreamProcessor } from "@/lib/media-stream"
-import { FactCheckDisplay } from "@/components/fact-check-display"
+import { useState, useRef, useEffect } from "react";
+import { Camera, History, Mic, PauseCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card } from "@/components/ui/card";
+import { createWebSocketClient } from "@/lib/websocket";
+import { createMediaStreamProcessor } from "@/lib/media-stream";
+import { FactCheckDisplay } from "@/components/fact-check-display";
 import type {
   FactCheckResult,
   FactCheckStatus,
   SearchResult,
   AnalysisUpdate,
   WebSocketMessage,
-} from "@/types/fact-check"
+} from "@/types/fact-check";
 
 export default function FactCheckPage() {
-  const [isRecording, setIsRecording] = useState(false)
-  const [activeTab, setActiveTab] = useState<"live" | "history">("live")
-  const [currentTranscript, setCurrentTranscript] = useState<string>("")
-  const [factCheckStatus, setFactCheckStatus] = useState<FactCheckStatus>()
-  const [currentFactCheck, setCurrentFactCheck] = useState<FactCheckResult>()
-  const [factCheckHistory, setFactCheckHistory] = useState<FactCheckResult[]>([])
-  const [searchResult, setSearchResult] = useState<SearchResult>()
-  const [analysisUpdate, setAnalysisUpdate] = useState<AnalysisUpdate>()
+  const [isRecording, setIsRecording] = useState(false);
+  const [activeTab, setActiveTab] = useState<"live" | "history">("live");
+  const [currentTranscript, setCurrentTranscript] = useState<string>("");
+  const [factCheckStatus, setFactCheckStatus] = useState<FactCheckStatus>();
+  const [currentFactCheck, setCurrentFactCheck] = useState<FactCheckResult>();
+  const [factCheckHistory, setFactCheckHistory] = useState<FactCheckResult[]>([]);
+  const [searchResult, setSearchResult] = useState<SearchResult>();
+  const [analysisUpdate, setAnalysisUpdate] = useState<AnalysisUpdate>();
 
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const wsRef = useRef<ReturnType<typeof createWebSocketClient> | null>(null)
-  const mediaProcessorRef = useRef<ReturnType<typeof createMediaStreamProcessor> | null>(null)
-  const clientId = useRef<string>(Math.random().toString(36).substring(7))
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const wsRef = useRef<ReturnType<typeof createWebSocketClient> | null>(null);
+  const mediaProcessorRef = useRef<ReturnType<typeof createMediaStreamProcessor> | null>(null);
+  const clientId = useRef<string>(Math.random().toString(36).substring(7));
 
   useEffect(() => {
-    // Initialize WebSocket connection
-    wsRef.current = createWebSocketClient(`${process.env.NEXT_PUBLIC_WEBSOCKET_URL}/ws/${clientId.current}`)
-    mediaProcessorRef.current = createMediaStreamProcessor()
+    const wsUrl = `${process.env.NEXT_PUBLIC_WEBSOCKET_URL}/ws/${clientId.current}`;
+    console.log("[WebSocket] Initializing client with URL:", wsUrl);
+    wsRef.current = createWebSocketClient(wsUrl);
+    mediaProcessorRef.current = createMediaStreamProcessor();
 
     wsRef.current.onMessage((data: WebSocketMessage) => {
-      console.log("Received message:", data)
-
+      console.log("[WebSocket] Received message from API:", data);
       switch (data.type) {
         case "transcription":
-          setCurrentTranscript(data.text)
-          break
+          console.log("[WebSocket] Transcription received:", data.text);
+          setCurrentTranscript(data.text);
+          break;
         case "status":
-          setFactCheckStatus(data)
-          break
+          console.log("[WebSocket] Status update received:", data);
+          setFactCheckStatus(data);
+          break;
         case "search":
-          setSearchResult(data)
-          break
+          console.log("[WebSocket] Search update received:", data);
+          setSearchResult(data);
+          break;
         case "analysis":
-          setAnalysisUpdate(data)
-          break
+          console.log("[WebSocket] Analysis update received:", data);
+          setAnalysisUpdate(data);
+          break;
         case "factCheck":
-          setCurrentFactCheck(data)
-          setFactCheckHistory((prev) => [data, ...prev])
-          break
+          console.log("[WebSocket] Final fact check result received:", data);
+          setCurrentFactCheck(data);
+          setFactCheckHistory((prev) => [data, ...prev]);
+          break;
         case "error":
-          console.error("Error from server:", data.message)
-          // You might want to show this in the UI
-          break
+          console.error("[WebSocket] Error received from API:", data.message);
+          break;
+        default:
+          console.warn("[WebSocket] Unknown message type received:", data);
+          break;
       }
-    })
+    });
 
-    wsRef.current.connect()
+    wsRef.current.connect();
+    console.log("[WebSocket] Connection initiated.");
 
     return () => {
-      wsRef.current?.close()
-      stopRecording()
-    }
-  }, [])
+      console.log("[WebSocket] Closing connection and stopping recording.");
+      wsRef.current?.close();
+      stopRecording();
+    };
+  }, []);
 
   const startRecording = async () => {
     try {
-      if (!mediaProcessorRef.current || !wsRef.current) return
-
-      const stream = await mediaProcessorRef.current.startStream((data) => {
-        wsRef.current?.sendMessage({
-          type: "mediaChunk",
-          data: data,
-        })
-      })
+      console.log("[Recording] Starting recording...");
+      if (!mediaProcessorRef.current || !wsRef.current) {
+        console.error("[Recording] Media processor or WebSocket client not initialized.");
+        return;
+      }
+      const stream = await mediaProcessorRef.current.startStream((data: ArrayBuffer) => {
+        console.log("[Recording] Sending raw binary media chunk (length):", data.byteLength);
+        wsRef.current?.sendMessage(data);
+      });
 
       if (videoRef.current && stream) {
-        videoRef.current.srcObject = stream
+        videoRef.current.srcObject = stream;
+        console.log("[Recording] Video element source set.");
       }
-
-      setIsRecording(true)
+      setIsRecording(true);
+      console.log("[Recording] Recording started.");
     } catch (err) {
-      console.error("Error starting recording:", err)
+      console.error("[Recording] Error starting recording:", err);
     }
-  }
+  };
 
   const stopRecording = () => {
+    console.log("[Recording] Stopping recording...");
     if (mediaProcessorRef.current) {
-      mediaProcessorRef.current.stopStream()
+      mediaProcessorRef.current.stopStream();
+      console.log("[Recording] Media stream stopped.");
     }
     if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream
-      stream.getTracks().forEach((track) => track.stop())
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((track) => track.stop());
+      console.log("[Recording] Video stream tracks stopped.");
     }
-    setIsRecording(false)
-    setCurrentTranscript("")
-    setCurrentFactCheck(undefined)
-    setFactCheckStatus(undefined)
-  }
+    setIsRecording(false);
+    setCurrentTranscript("");
+    setCurrentFactCheck(undefined);
+    setFactCheckStatus(undefined);
+    console.log("[Recording] Recording state reset.");
+  };
 
   return (
       <main className="min-h-screen bg-slate-700 text-white p-4">
@@ -112,7 +127,6 @@ export default function FactCheckPage() {
           {/* Camera Preview */}
           <div className="relative aspect-[9/16] bg-black/20 rounded-lg overflow-hidden">
             <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
-
             {/* Recording Controls */}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4">
               <Button
@@ -125,7 +139,6 @@ export default function FactCheckPage() {
                 {isRecording ? "Stop" : "Start"} Recording
               </Button>
             </div>
-
             {/* Live Transcription */}
             {isRecording && currentTranscript && (
                 <div className="absolute top-4 left-4 right-4">
@@ -135,7 +148,6 @@ export default function FactCheckPage() {
                   </Card>
                 </div>
             )}
-
             {/* Live Fact Check Results */}
             {isRecording && (factCheckStatus || searchResult || analysisUpdate || currentFactCheck) && (
                 <div className="absolute bottom-24 left-4 right-4">
@@ -148,13 +160,15 @@ export default function FactCheckPage() {
                 </div>
             )}
           </div>
-
           {/* Tab Buttons */}
           <div className="flex gap-2">
             <Button
                 variant={activeTab === "live" ? "secondary" : "ghost"}
                 className="flex-1"
-                onClick={() => setActiveTab("live")}
+                onClick={() => {
+                  console.log("[UI] Switching to live tab");
+                  setActiveTab("live");
+                }}
             >
               <Mic className="w-4 h-4 mr-2" />
               Live
@@ -162,13 +176,15 @@ export default function FactCheckPage() {
             <Button
                 variant={activeTab === "history" ? "secondary" : "ghost"}
                 className="flex-1"
-                onClick={() => setActiveTab("history")}
+                onClick={() => {
+                  console.log("[UI] Switching to history tab");
+                  setActiveTab("history");
+                }}
             >
               <History className="w-4 h-4 mr-2" />
               History
             </Button>
           </div>
-
           {/* History Section */}
           {activeTab === "history" && (
               <ScrollArea className="h-[300px]">
@@ -181,5 +197,5 @@ export default function FactCheckPage() {
           )}
         </div>
       </main>
-  )
+  );
 }
