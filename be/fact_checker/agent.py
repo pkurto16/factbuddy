@@ -23,7 +23,7 @@ class FactCheckAgent:
         context_prompt = "\n".join(self.context_window)
 
         response = await self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a fact-checking assistant. Analyze the statement in context and provide a clear, factual version of the claim being made."},
                 {"role": "user", "content": f"Context:\n{context_prompt}\n\nLatest statement:\n{statement}\n\nExtract the main factual claim from this statement, considering the context."}
@@ -35,7 +35,7 @@ class FactCheckAgent:
     async def generate_search_query(self, claim: str) -> str:
         """Generate an effective search query for the claim"""
         response = await self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Generate a precise search query to fact-check this claim."},
                 {"role": "user", "content": f"Claim: {claim}"}
@@ -89,7 +89,7 @@ class FactCheckAgent:
     async def analyze_source_credibility(self, source: Dict[str, Any], claim: str) -> Dict[str, Any]:
         """Analyze credibility of a source regarding the claim"""
         response = await self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Analyze this source's credibility and its stance on the claim. Provide a credibility score (0-100) and explanation."},
                 {"role": "user", "content": f"Claim: {claim}\n\nSource content: {source['content']}\nURL: {source['url']}"}
@@ -122,7 +122,7 @@ class FactCheckAgent:
         ])
 
         response = await self.client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "Synthesize a final fact-check result based on the most credible sources."},
                 {"role": "user", "content": f"Claim: {claim}\n\nSources:\n{sources_text}"}
@@ -150,47 +150,90 @@ class FactCheckAgent:
             await websocket.send_json({
                 "type": "status",
                 "message": "Analyzing context...",
-                "phase": "context"
+                "phase": "context",
+                "progress": 0
             })
 
             contextualized_claim = await self.analyze_context(statement)
+
+            # Send contextualized claim
+            await websocket.send_json({
+                "type": "analysis",
+                "source": "Context Analysis",
+                "credibility": 100,
+                "summary": f"Analyzed claim: {contextualized_claim}"
+            })
 
             # 2. Search Query Generation
             await websocket.send_json({
                 "type": "status",
                 "message": "Generating search query...",
-                "phase": "search"
+                "phase": "search",
+                "progress": 20
             })
 
             search_query = await self.generate_search_query(contextualized_claim)
+
+            # Send search query
+            await websocket.send_json({
+                "type": "search",
+                "query": search_query,
+                "sources": []
+            })
 
             # 3. Web Scraping
             await websocket.send_json({
                 "type": "status",
                 "message": "Gathering sources...",
-                "phase": "sources"
+                "phase": "sources",
+                "progress": 40
             })
 
             sources = await self.search_and_scrape(search_query)
+
+            # Update with found sources
+            await websocket.send_json({
+                "type": "search",
+                "query": search_query,
+                "sources": [s["url"] for s in sources]
+            })
 
             # 4. Source Analysis
             await websocket.send_json({
                 "type": "status",
                 "message": "Analyzing sources...",
-                "phase": "analysis"
+                "phase": "analysis",
+                "progress": 60
             })
 
-            credibility_tasks = [
-                self.analyze_source_credibility(source, contextualized_claim)
-                for source in sources
-            ]
-            analyzed_sources = await asyncio.gather(*credibility_tasks)
+            # Analyze sources one by one and stream results
+            analyzed_sources = []
+            for i, source in enumerate(sources):
+                analysis = await self.analyze_source_credibility(source, contextualized_claim)
+                analyzed_sources.append(analysis)
+
+                # Send individual source analysis
+                await websocket.send_json({
+                    "type": "analysis",
+                    "source": source["url"],
+                    "credibility": analysis["credibility_score"],
+                    "summary": analysis["analysis"]
+                })
+
+                # Update progress
+                await websocket.send_json({
+                    "type": "status",
+                    "message": f"Analyzing source {i + 1} of {len(sources)}...",
+                    "phase": "analysis",
+                    "progress": 60 + (20 * (i + 1) / len(sources))
+                })
 
             # 5. Final Synthesis
             await websocket.send_json({
                 "type": "status",
                 "message": "Synthesizing results...",
-                "phase": "synthesis"
+                "phase": "synthesis",
+                "progress": 90
             })
 
             final_result = await self.synthesize_final_check(
@@ -198,10 +241,19 @@ class FactCheckAgent:
                 analyzed_sources
             )
 
+            # Send completion status
+            await websocket.send_json({
+                "type": "status",
+                "message": "Fact-check complete",
+                "phase": "complete",
+                "progress": 100
+            })
+
             # Send final result
             await websocket.send_json(final_result)
 
         except Exception as e:
+            print(f"Error in fact-checking: {str(e)}")  # Server-side logging
             await websocket.send_json({
                 "type": "error",
                 "message": f"Error during fact-checking: {str(e)}"

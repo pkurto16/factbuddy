@@ -8,6 +8,9 @@ import base64
 from datetime import datetime
 from pathlib import Path
 import aiofiles
+from dotenv import load_dotenv
+load_dotenv()
+
 
 app = FastAPI()
 
@@ -47,24 +50,46 @@ manager = ConnectionManager()
 UPLOAD_DIR = Path("video_segments")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-async def save_video_chunk(data: bytes, session_id: str) -> str:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{session_id}_{timestamp}.webm"
-    filepath = UPLOAD_DIR / filename
 
-    async with aiofiles.open(filepath, 'wb') as f:
-        await f.write(data)
+async def save_video_chunk(data: str, session_id: str) -> str:
+    """Save a base64 encoded video chunk to file"""
+    try:
+        # Remove the data URL prefix if present
+        if ',' in data:
+            data = data.split(',')[1]
 
-    return str(filepath)
+        # Decode base64 data
+        binary_data = base64.b64decode(data)
+
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{session_id}_{timestamp}.webm"
+        filepath = UPLOAD_DIR / filename
+
+        # Save the binary data
+        async with aiofiles.open(filepath, 'wb') as f:
+            await f.write(binary_data)
+
+        return str(filepath)
+    except Exception as e:
+        print(f"Error saving video chunk: {e}")
+        raise
+
 
 async def process_audio_chunk(filepath: str) -> str:
     """Process audio chunk using Whisper"""
     try:
+        # Make sure the file exists and has content
+        if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+            print(f"Invalid or empty file: {filepath}")
+            return ""
+
         result = model.transcribe(filepath)
         return result["text"]
     except Exception as e:
         print(f"Transcription error: {e}")
         return ""
+
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -73,34 +98,55 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
+            try:
+                message = json.loads(data)
 
-            if message["type"] == "mediaChunk":
-                # Decode and save video chunk
-                media_data = base64.b64decode(message["data"].split(",")[1])
-                video_path = await save_video_chunk(media_data, client_id)
+                if message["type"] == "mediaChunk":
+                    if not message.get("data"):
+                        print("Received empty media chunk")
+                        continue
 
-                # Transcribe audio
-                transcription = await process_audio_chunk(video_path)
+                    # Save the video chunk
+                    video_path = await save_video_chunk(message["data"], client_id)
 
-                if transcription.strip():
-                    # Send transcription result
-                    await websocket.send_json({
-                        "type": "transcription",
-                        "text": transcription
-                    })
+                    # Process the audio
+                    transcription = await process_audio_chunk(video_path)
 
-                    # Start fact-checking process
-                    await fact_checker.stream_fact_check(transcription, websocket)
+                    if transcription.strip():
+                        # Send transcription result
+                        await websocket.send_json({
+                            "type": "transcription",
+                            "text": transcription
+                        })
+
+                        # Start fact-checking process
+                        await fact_checker.stream_fact_check(transcription, websocket)
+
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid JSON message"
+                })
+            except Exception as e:
+                print(f"Error processing message: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e)
+                })
 
     except WebSocketDisconnect:
         manager.disconnect(client_id)
     except Exception as e:
-        print(f"Error: {e}")
-        await websocket.send_json({
-            "type": "error",
-            "message": str(e)
-        })
+        print(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e)
+            })
+        except:
+            pass  # Connection might be already closed
+
 
 if __name__ == "__main__":
     import uvicorn

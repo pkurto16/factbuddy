@@ -1,4 +1,3 @@
-// Update WebSocket URL to point to FastAPI backend
 const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL || "ws://localhost:8000/ws"
 
 class WebSocketClient {
@@ -13,10 +12,11 @@ class WebSocketClient {
     }
 
     connect() {
+        console.log("Attempting to connect to WebSocket:", this.url)
         this.ws = new WebSocket(this.url)
 
         this.ws.onopen = () => {
-            console.log("Connected to WebSocket")
+            console.log("WebSocket connection established")
             this.reconnectAttempts = 0
         }
 
@@ -30,9 +30,14 @@ class WebSocketClient {
         }
 
         this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data)
-            if (this.onMessageCallback) {
-                this.onMessageCallback(data)
+            console.log("Received WebSocket message:", event.data)
+            try {
+                const data = JSON.parse(event.data)
+                if (this.onMessageCallback) {
+                    this.onMessageCallback(data)
+                }
+            } catch (error) {
+                console.error("Error parsing WebSocket message:", error)
             }
         }
     }
@@ -40,13 +45,18 @@ class WebSocketClient {
     private attemptReconnect() {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++
+            console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
             setTimeout(() => this.connect(), 1000 * this.reconnectAttempts)
         }
     }
 
     sendMessage(data: any) {
         if (this.ws?.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(data))
+            const message = JSON.stringify(data)
+            console.log("Sending WebSocket message:", message)
+            this.ws.send(message)
+        } else {
+            console.warn("WebSocket is not open. Current state:", this.ws?.readyState)
         }
     }
 

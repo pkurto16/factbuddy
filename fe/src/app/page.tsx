@@ -8,7 +8,13 @@ import { Card } from "@/components/ui/card"
 import { createWebSocketClient } from "@/lib/websocket"
 import { createMediaStreamProcessor } from "@/lib/media-stream"
 import { FactCheckDisplay } from "@/components/fact-check-display"
-import type { FactCheckResult, FactCheckStatus, WebSocketMessage } from "@/types/fact-check"
+import type {
+  FactCheckResult,
+  FactCheckStatus,
+  SearchResult,
+  AnalysisUpdate,
+  WebSocketMessage,
+} from "@/types/fact-check"
 
 export default function FactCheckPage() {
   const [isRecording, setIsRecording] = useState(false)
@@ -17,6 +23,8 @@ export default function FactCheckPage() {
   const [factCheckStatus, setFactCheckStatus] = useState<FactCheckStatus>()
   const [currentFactCheck, setCurrentFactCheck] = useState<FactCheckResult>()
   const [factCheckHistory, setFactCheckHistory] = useState<FactCheckResult[]>([])
+  const [searchResult, setSearchResult] = useState<SearchResult>()
+  const [analysisUpdate, setAnalysisUpdate] = useState<AnalysisUpdate>()
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const wsRef = useRef<ReturnType<typeof createWebSocketClient> | null>(null)
@@ -29,6 +37,8 @@ export default function FactCheckPage() {
     mediaProcessorRef.current = createMediaStreamProcessor()
 
     wsRef.current.onMessage((data: WebSocketMessage) => {
+      console.log("Received message:", data)
+
       switch (data.type) {
         case "transcription":
           setCurrentTranscript(data.text)
@@ -36,9 +46,19 @@ export default function FactCheckPage() {
         case "status":
           setFactCheckStatus(data)
           break
+        case "search":
+          setSearchResult(data)
+          break
+        case "analysis":
+          setAnalysisUpdate(data)
+          break
         case "factCheck":
           setCurrentFactCheck(data)
           setFactCheckHistory((prev) => [data, ...prev])
+          break
+        case "error":
+          console.error("Error from server:", data.message)
+          // You might want to show this in the UI
           break
       }
     })
@@ -117,9 +137,14 @@ export default function FactCheckPage() {
             )}
 
             {/* Live Fact Check Results */}
-            {isRecording && (factCheckStatus || currentFactCheck) && (
+            {isRecording && (factCheckStatus || searchResult || analysisUpdate || currentFactCheck) && (
                 <div className="absolute bottom-24 left-4 right-4">
-                  <FactCheckDisplay status={factCheckStatus} result={currentFactCheck} />
+                  <FactCheckDisplay
+                      status={factCheckStatus}
+                      result={currentFactCheck}
+                      searchResult={searchResult}
+                      analysisUpdate={analysisUpdate}
+                  />
                 </div>
             )}
           </div>

@@ -1,25 +1,57 @@
-export interface FactCheckStatus {
-    type: "status"
-    message: string
-    phase: "context" | "search" | "sources" | "analysis" | "synthesis"
+export interface BaseMessage {
+    type: string
 }
 
-export interface FactCheckResult {
-    type: "factCheck"
-    statement: string
-    truthScore: number
-    correction: string
-    sources: Array<{
-        url: string
-        credibility: number
-    }>
-    timestamp: string
-}
-
-export interface TranscriptionResult {
+export interface TranscriptionResult extends BaseMessage {
     type: "transcription"
     text: string
 }
 
-export type WebSocketMessage = FactCheckStatus | FactCheckResult | TranscriptionResult
+export interface FactCheckStatus extends BaseMessage {
+    type: "status"
+    message: string
+    phase: "context" | "search" | "sources" | "analysis" | "synthesis"
+    progress?: number
+}
 
+export interface Source {
+    url: string
+    credibility: number
+    title?: string
+    snippet?: string
+}
+
+export interface FactCheckResult extends BaseMessage {
+    type: "factCheck"
+    statement: string
+    truthScore: number
+    correction: string
+    sources: Source[]
+    timestamp: string
+}
+
+export interface SearchResult extends BaseMessage {
+    type: "search"
+    query: string
+    sources: string[]
+}
+
+export interface AnalysisUpdate extends BaseMessage {
+    type: "analysis"
+    source: string
+    credibility: number
+    summary: string
+}
+
+export interface ErrorMessage extends BaseMessage {
+    type: "error"
+    message: string
+}
+
+export type WebSocketMessage =
+    | TranscriptionResult
+    | FactCheckStatus
+    | FactCheckResult
+    | SearchResult
+    | AnalysisUpdate
+    | ErrorMessage

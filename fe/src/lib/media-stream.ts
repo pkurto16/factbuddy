@@ -2,9 +2,9 @@ export class MediaStreamProcessor {
     private mediaRecorder: MediaRecorder | null = null
     private chunks: Blob[] = []
     private stream: MediaStream | null = null
-    private processingInterval: NodeJS.Timer | null = null
+    private ws: WebSocket | null = null
 
-    async startStream(onDataAvailable: (data: Blob) => void) {
+    async startStream(onDataAvailable: (data: string) => void) {
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: true,
@@ -15,10 +15,12 @@ export class MediaStreamProcessor {
                 mimeType: "video/webm;codecs=vp8,opus",
             })
 
-            this.mediaRecorder.ondataavailable = (event) => {
+            this.mediaRecorder.ondataavailable = async (event) => {
                 if (event.data.size > 0) {
                     this.chunks.push(event.data)
-                    onDataAvailable(event.data)
+                    // Convert blob to base64
+                    const base64data = await this.blobToBase64(event.data)
+                    onDataAvailable(base64data)
                 }
             }
 
@@ -32,6 +34,21 @@ export class MediaStreamProcessor {
         }
     }
 
+    private blobToBase64(blob: Blob): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => {
+                if (typeof reader.result === "string") {
+                    resolve(reader.result)
+                } else {
+                    reject(new Error("Failed to convert blob to base64"))
+                }
+            }
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+        })
+    }
+
     stopStream() {
         if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
             this.mediaRecorder.stop()
@@ -39,10 +56,6 @@ export class MediaStreamProcessor {
 
         if (this.stream) {
             this.stream.getTracks().forEach((track) => track.stop())
-        }
-
-        if (this.processingInterval) {
-            clearInterval(this.processingInterval)
         }
 
         this.chunks = []
@@ -53,22 +66,6 @@ export class MediaStreamProcessor {
     getRecordedBlob(): Blob | null {
         if (this.chunks.length === 0) return null
         return new Blob(this.chunks, { type: "video/webm" })
-    }
-
-    // Update the sendMessage method to encode media data as base64
-    sendMessage(data: Blob) {
-        const reader = new FileReader()
-        reader.onload = () => {
-            if (this.ws?.readyState === WebSocket.OPEN) {
-                this.ws.send(
-                    JSON.stringify({
-                        type: "mediaChunk",
-                        data: reader.result,
-                    }),
-                )
-            }
-        }
-        reader.readAsDataURL(data)
     }
 }
 
