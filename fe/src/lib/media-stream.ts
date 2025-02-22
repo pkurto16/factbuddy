@@ -4,13 +4,15 @@ export class MediaStreamProcessor {
 
     async startStream(onDataAvailable: (data: ArrayBuffer) => void) {
         try {
+            // Request both video and audio for preview
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: true,
                 audio: true,
             });
-
-            this.mediaRecorder = new MediaRecorder(this.stream, {
-                mimeType: "video/webm;codecs=vp8,opus",
+            // For recording, use only the audio tracks.
+            const audioStream = new MediaStream(this.stream.getAudioTracks());
+            this.mediaRecorder = new MediaRecorder(audioStream, {
+                mimeType: "audio/webm",
             });
 
             this.mediaRecorder.ondataavailable = async (event) => {
@@ -20,8 +22,8 @@ export class MediaStreamProcessor {
                 }
             };
 
-            // Start recording with 1-second chunks
-            this.mediaRecorder.start(1000);
+            // Start recording with larger chunks (e.g. 5000ms = 5 seconds)
+            this.mediaRecorder.start(5000);
             return this.stream;
         } catch (error) {
             console.error("Error accessing media devices:", error);
@@ -33,7 +35,6 @@ export class MediaStreamProcessor {
         if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
             this.mediaRecorder.stop();
         }
-
         if (this.stream) {
             this.stream.getTracks().forEach((track) => track.stop());
         }

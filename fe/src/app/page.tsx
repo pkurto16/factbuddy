@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react";
-import { Camera, History, Mic, PauseCircle } from "lucide-react";
+import { Mic, History, PauseCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
@@ -82,22 +82,22 @@ export default function FactCheckPage() {
 
   const startRecording = async () => {
     try {
-      console.log("[Recording] Starting recording...");
+      console.log("[Recording] Starting audio recording...");
       if (!mediaProcessorRef.current || !wsRef.current) {
         console.error("[Recording] Media processor or WebSocket client not initialized.");
         return;
       }
       const stream = await mediaProcessorRef.current.startStream((data: ArrayBuffer) => {
-        console.log("[Recording] Sending raw binary media chunk (length):", data.byteLength);
+        console.log("[Recording] Sending raw binary audio chunk (length):", data.byteLength);
         wsRef.current?.sendMessage(data);
       });
-
+      // Set video preview using the full stream (with video)
       if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
         console.log("[Recording] Video element source set.");
       }
       setIsRecording(true);
-      console.log("[Recording] Recording started.");
+      console.log("[Recording] Audio recording started.");
     } catch (err) {
       console.error("[Recording] Error starting recording:", err);
     }
@@ -107,12 +107,7 @@ export default function FactCheckPage() {
     console.log("[Recording] Stopping recording...");
     if (mediaProcessorRef.current) {
       mediaProcessorRef.current.stopStream();
-      console.log("[Recording] Media stream stopped.");
-    }
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => track.stop());
-      console.log("[Recording] Video stream tracks stopped.");
+      console.log("[Recording] Audio stream stopped.");
     }
     setIsRecording(false);
     setCurrentTranscript("");
@@ -124,43 +119,11 @@ export default function FactCheckPage() {
   return (
       <main className="min-h-screen bg-slate-700 text-white p-4">
         <div className="max-w-md mx-auto space-y-4">
-          {/* Camera Preview */}
+          {/* Video Preview */}
           <div className="relative aspect-[9/16] bg-black/20 rounded-lg overflow-hidden">
             <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
-            {/* Recording Controls */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4">
-              <Button
-                  size="lg"
-                  variant={isRecording ? "destructive" : "default"}
-                  className="rounded-full"
-                  onClick={isRecording ? stopRecording : startRecording}
-              >
-                {isRecording ? <PauseCircle className="w-6 h-6 mr-2" /> : <Camera className="w-6 h-6 mr-2" />}
-                {isRecording ? "Stop" : "Start"} Recording
-              </Button>
-            </div>
-            {/* Live Transcription */}
-            {isRecording && currentTranscript && (
-                <div className="absolute top-4 left-4 right-4">
-                  <Card className="bg-black/40 backdrop-blur-sm border-none p-4">
-                    <p className="text-sm opacity-80">{"I'm hearing..."}</p>
-                    <p className="text-lg">{currentTranscript}</p>
-                  </Card>
-                </div>
-            )}
-            {/* Live Fact Check Results */}
-            {isRecording && (factCheckStatus || searchResult || analysisUpdate || currentFactCheck) && (
-                <div className="absolute bottom-24 left-4 right-4">
-                  <FactCheckDisplay
-                      status={factCheckStatus}
-                      result={currentFactCheck}
-                      searchResult={searchResult}
-                      analysisUpdate={analysisUpdate}
-                  />
-                </div>
-            )}
           </div>
-          {/* Tab Buttons */}
+          {/* Controls */}
           <div className="flex gap-2">
             <Button
                 variant={activeTab === "live" ? "secondary" : "ghost"}
@@ -185,7 +148,34 @@ export default function FactCheckPage() {
               History
             </Button>
           </div>
-          {/* History Section */}
+          {/* Live Transcription & Fact Check Display */}
+          {isRecording && currentTranscript && (
+              <Card className="bg-black/40 backdrop-blur-sm border-none p-4">
+                <p className="text-sm opacity-80">{"I'm hearing..."}</p>
+                <p className="text-lg">{currentTranscript}</p>
+              </Card>
+          )}
+          {isRecording && (factCheckStatus || searchResult || analysisUpdate || currentFactCheck) && (
+              <div className="space-y-4">
+                <FactCheckDisplay
+                    status={factCheckStatus}
+                    result={currentFactCheck}
+                    searchResult={searchResult}
+                    analysisUpdate={analysisUpdate}
+                />
+              </div>
+          )}
+          <div className="mt-4">
+            <Button
+                size="lg"
+                variant={isRecording ? "destructive" : "default"}
+                className="rounded-full"
+                onClick={isRecording ? stopRecording : startRecording}
+            >
+              {isRecording ? <PauseCircle className="w-6 h-6 mr-2" /> : <Mic className="w-6 h-6 mr-2" />}
+              {isRecording ? "Stop" : "Start"} Recording
+            </Button>
+          </div>
           {activeTab === "history" && (
               <ScrollArea className="h-[300px]">
                 <div className="space-y-4">
