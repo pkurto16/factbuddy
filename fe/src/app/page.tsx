@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react";
 import { Mic, History, PauseCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card } from "@/components/ui/card";
 import { createWebSocketClient } from "@/lib/websocket";
 import { createMediaStreamProcessor } from "@/lib/media-stream";
 import { FactCheckDisplay } from "@/components/fact-check-display";
@@ -54,7 +53,6 @@ export default function FactCheckPage() {
           break;
         case "analysis":
           console.log("[WebSocket] Analysis update received:", data);
-          setAnalysisUpdate(data);
           break;
         case "factCheck":
           console.log("[WebSocket] Final fact check result received:", data);
@@ -91,7 +89,7 @@ export default function FactCheckPage() {
         console.log("[Recording] Sending raw binary audio chunk (length):", data.byteLength);
         wsRef.current?.sendMessage(data);
       });
-      // Set video preview using the full stream (with video)
+      // Set video preview using the full stream (video + audio)
       if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
         console.log("[Recording] Video element source set.");
@@ -117,13 +115,19 @@ export default function FactCheckPage() {
   };
 
   return (
-      <main className="min-h-screen bg-slate-700 text-white p-4">
-        <div className="max-w-md mx-auto space-y-4">
-          {/* Video Preview */}
-          <div className="relative aspect-[9/16] bg-black/20 rounded-lg overflow-hidden">
-            <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
-          </div>
-          {/* Controls */}
+      <main className="min-h-screen bg-slate-700 text-white p-4 relative">
+        {/* Video Preview */}
+        <div className="relative aspect-[9/16] bg-black/20 rounded-lg overflow-hidden">
+          <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+        </div>
+
+        {/* Expandable Fact-Check Overlay */}
+        {isRecording && (factCheckStatus || currentFactCheck) && (
+            <FactCheckDisplay result={currentFactCheck} status={factCheckStatus} />
+        )}
+
+        {/* Controls & History */}
+        <div className="max-w-md mx-auto space-y-4 mt-4">
           <div className="flex gap-2">
             <Button
                 variant={activeTab === "live" ? "secondary" : "ghost"}
@@ -148,22 +152,18 @@ export default function FactCheckPage() {
               History
             </Button>
           </div>
-          {/* Live Transcription & Fact Check Display */}
-          {isRecording && currentTranscript && (
-              <Card className="bg-black/40 backdrop-blur-sm border-none p-4">
-                <p className="text-sm opacity-80">{"I'm hearing..."}</p>
-                <p className="text-lg">{currentTranscript}</p>
-              </Card>
-          )}
-          {isRecording && (factCheckStatus || searchResult || analysisUpdate || currentFactCheck) && (
-              <div className="space-y-4">
-                <FactCheckDisplay
-                    status={factCheckStatus}
-                    result={currentFactCheck}
-                    searchResult={searchResult}
-                    analysisUpdate={analysisUpdate}
-                />
-              </div>
+          {activeTab === "history" && (
+              <ScrollArea className="h-[300px]">
+                <div className="space-y-4">
+                  {factCheckHistory.map((result, index) => (
+                      <div key={index} className="border p-2 rounded">
+                        <div className="text-sm font-medium">{result.statement}</div>
+                        <div className="text-xs">Truth: {result.truthScore ? result.truthScore.toFixed(1) + "%" : "N/A"}</div>
+                        <div className="mt-1 text-xs">{result.correction}</div>
+                      </div>
+                  ))}
+                </div>
+              </ScrollArea>
           )}
           <div className="mt-4">
             <Button
@@ -176,15 +176,6 @@ export default function FactCheckPage() {
               {isRecording ? "Stop" : "Start"} Recording
             </Button>
           </div>
-          {activeTab === "history" && (
-              <ScrollArea className="h-[300px]">
-                <div className="space-y-4">
-                  {factCheckHistory.map((result, index) => (
-                      <FactCheckDisplay key={index} result={result} />
-                  ))}
-                </div>
-              </ScrollArea>
-          )}
         </div>
       </main>
   );

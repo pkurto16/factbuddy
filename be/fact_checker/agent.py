@@ -7,6 +7,7 @@ import numpy as np
 from urllib.parse import quote_plus
 import json
 from datetime import datetime
+import os  # For file deletion
 
 class FactCheckAgent:
     def __init__(self, openai_api_key: str):
@@ -30,12 +31,8 @@ class FactCheckAgent:
                 if response.status == 200:
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
-
-                    # Remove script and style elements
                     for script in soup(["script", "style"]):
                         script.decompose()
-
-                    # Extract text (limit to the first 5000 characters)
                     text = soup.get_text(separator=' ', strip=True)
                     return {
                         "url": url,
@@ -49,19 +46,24 @@ class FactCheckAgent:
     async def search_and_scrape(self, query: str) -> List[Dict[str, Any]]:
         """Perform search and parallel scraping of results."""
         search_url = f"https://www.google.com/search?q={quote_plus(query)}"
-
-        async with aiohttp.ClientSession() as session:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        }
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(search_url) as response:
                 html = await response.text()
                 soup = BeautifulSoup(html, 'html.parser')
-
-                # Extract URLs (adjust selectors based on Google's HTML structure)
-                urls = [a['href'] for a in soup.select('a[href^="http"]')][:10]
-
-                # Parallel scraping
+                urls = []
+                for a in soup.find_all("a", href=True):
+                    href = a["href"]
+                    if href.startswith("/url?q="):
+                        actual_url = href.split("/url?q=")[1].split("&")[0]
+                        if "support.google.com" not in actual_url:
+                            urls.append(actual_url)
+                    if len(urls) >= 10:
+                        break
                 tasks = [self.scrape_url(session, url) for url in urls]
                 results = await asyncio.gather(*tasks)
-
                 return [r for r in results if r["status"] == "success"]
 
     async def synthesize_final_check(self, claim: str, sources: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -89,9 +91,7 @@ class FactCheckAgent:
                 {"role": "user", "content": prompt}
             ]
         )
-
         synthesis = response.choices[0].message.content
-
         return {
             "type": "factCheck",
             "statement": claim,
@@ -109,40 +109,32 @@ class FactCheckAgent:
                 "phase": "search",
                 "progress": 20
             })
-
             search_query = await self.generate_search_query(statement)
-
             await websocket.send_json({
                 "type": "search",
                 "query": search_query,
                 "sources": []
             })
-
             await websocket.send_json({
                 "type": "status",
                 "message": "Scraping sources...",
                 "phase": "sources",
                 "progress": 40
             })
-
             sources = await self.search_and_scrape(search_query)
-
             await websocket.send_json({
                 "type": "status",
                 "message": f"Scraped {len(sources)} sources.",
                 "phase": "sources",
                 "progress": 60
             })
-
             final_result = await self.synthesize_final_check(statement, sources)
-
             await websocket.send_json({
                 "type": "status",
                 "message": "Fact-check complete",
                 "phase": "complete",
                 "progress": 100
             })
-
             await websocket.send_json(final_result)
         except Exception as e:
             print(f"Error in fact-checking: {str(e)}")
@@ -150,3 +142,22 @@ class FactCheckAgent:
                 "type": "error",
                 "message": f"Error during fact-checking: {str(e)}"
             })
+
+# --- File Cleanup in process_audio_chunk ---
+async def process_audio_chunk(filepath: str, model) -> str:
+    """Process audio chunk using Whisper and delete file afterwards."""
+    try:
+        if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+            return ""
+        result = model.transcribe(filepath)
+        text = result["text"]
+        return text
+    except Exception as e:
+        print(f"Transcription error for file {filepath}: {e}")
+        return ""
+    finally:
+        try:
+            os.remove(filepath)
+            print(f"Deleted file: {filepath}")
+        except Exception as del_e:
+            print(f"Error deleting file {filepath}: {del_e}")
