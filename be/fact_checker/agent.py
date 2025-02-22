@@ -7,7 +7,6 @@ import numpy as np
 from urllib.parse import quote_plus
 import json
 from datetime import datetime
-import os  # For file deletion
 
 class FactCheckAgent:
     def __init__(self, openai_api_key: str):
@@ -23,6 +22,31 @@ class FactCheckAgent:
             ]
         )
         return response.choices[0].message.content
+
+    async def evaluate_fact_statement(self, text: str) -> Dict[str, Any]:
+        """
+        Evaluate the aggregated transcription to determine if it constitutes a complete fact statement.
+        Respond with a JSON object like:
+          {"complete": true/false, "action": "append" or "new"}
+        """
+        prompt = (
+            f"Given the following aggregated transcription:\n\"{text}\"\n\n"
+            "Answer as JSON with two keys:\n"
+            "1. \"complete\": true if this transcription forms a complete fact statement, otherwise false.\n"
+            "2. \"action\": if complete is true, respond with 'new' if this transcription starts a new fact compared to previous ones, or 'append' if it continues the previous fact.\n"
+            "For example: {\"complete\": true, \"action\": \"new\"} or {\"complete\": true, \"action\": \"append\"}.\n"
+            "If not complete, simply respond with {\"complete\": false, \"action\": \"append\"}."
+        )
+        response = await self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        try:
+            result = json.loads(response.choices[0].message.content)
+        except Exception as e:
+            # In case of error, default to not complete
+            result = {"complete": False, "action": "append"}
+        return result
 
     async def scrape_url(self, session: aiohttp.ClientSession, url: str) -> Dict[str, Any]:
         """Scrape and extract content from a URL."""
@@ -47,8 +71,11 @@ class FactCheckAgent:
         """Perform search and parallel scraping of results."""
         search_url = f"https://www.google.com/search?q={quote_plus(query)}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/114.0.0.0 Safari/537.36")
         }
+        invalid_sources = []
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(search_url) as response:
                 html = await response.text()
@@ -64,6 +91,12 @@ class FactCheckAgent:
                         break
                 tasks = [self.scrape_url(session, url) for url in urls]
                 results = await asyncio.gather(*tasks)
+                for res in results:
+                    if res.get("status") != "success":
+                        invalid_sources.append(res)
+                        logging.warning(f"Invalid source: {res}")
+                if invalid_sources:
+                    logging.info(f"Total invalid sources: {len(invalid_sources)}")
                 return [r for r in results if r["status"] == "success"]
 
     async def synthesize_final_check(self, claim: str, sources: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -78,26 +111,36 @@ class FactCheckAgent:
         prompt = (
             f"Claim: {claim}\n\n"
             f"Scraped Sources:\n{sources_text}\n\n"
-            "Summarize the main points from the above sources and determine if the overall sentiment of the sources supports the claim. "
-            "Respond with a brief summary and then conclude with either 'Supports' or 'Does not support' along with a short explanation."
+            "Summarize the main points from the above sources and determine if the overall sentiment supports the claim. "
+            "Respond with a brief summary and then conclude with either 'Supports' or 'Does not support' along with a short explanation. "
+            "Also, assign a credibility score for the aggregated evidence (0-100) and include it in your response in the format: "
+            "{\"summary\": \"...\", \"verdict\": \"Supports\" or \"Does not support\", \"score\": <number>}."
         )
         response = await self.client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a fact-checking assistant that only summarizes scraped source content and determines whether the sentiment supports the given claim."
+                    "content": "You are a fact-checking assistant that summarizes scraped source content and determines whether the overall sentiment supports the given claim, providing a credibility score."
                 },
                 {"role": "user", "content": prompt}
             ]
         )
         synthesis = response.choices[0].message.content
+        # For simplicity, we assume the synthesis output includes a credibility score.
+        # In practice, you may need to parse it.
+        try:
+            parsed = json.loads(synthesis)
+            score = float(parsed.get("score", 50.0))
+        except Exception:
+            score = 50.0
         return {
             "type": "factCheck",
             "statement": claim,
             "correction": synthesis,
             "sources": [{"url": s["url"]} for s in sources],
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "truthScore": score
         }
 
     async def stream_fact_check(self, statement: str, websocket) -> None:
@@ -142,22 +185,3 @@ class FactCheckAgent:
                 "type": "error",
                 "message": f"Error during fact-checking: {str(e)}"
             })
-
-# --- File Cleanup in process_audio_chunk ---
-async def process_audio_chunk(filepath: str, model) -> str:
-    """Process audio chunk using Whisper and delete file afterwards."""
-    try:
-        if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-            return ""
-        result = model.transcribe(filepath)
-        text = result["text"]
-        return text
-    except Exception as e:
-        print(f"Transcription error for file {filepath}: {e}")
-        return ""
-    finally:
-        try:
-            os.remove(filepath)
-            print(f"Deleted file: {filepath}")
-        except Exception as del_e:
-            print(f"Error deleting file {filepath}: {del_e}")

@@ -59,7 +59,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Global dictionaries for per-client running statements.
-client_statements: Dict[str, str] = {}
+client_statements: Dict[str, str] = {}  # Aggregated transcription per client
 last_fact_checked_statement: Dict[str, str] = {}
 
 # Audio storage setup
@@ -69,15 +69,18 @@ logging.info(f"Audio upload directory set to: {UPLOAD_DIR.resolve()}")
 
 
 async def process_audio_chunk(filepath: str) -> str:
-    """Process audio chunk using Whisper."""
+    """Process audio chunk using Whisper and return the transcription.
+       The file deletion is handled by the caller.
+    """
     try:
         if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
             logging.warning(f"Invalid or empty file: {filepath}")
             return ""
         logging.info(f"Processing audio file: {filepath}")
         result = model.transcribe(filepath)
-        logging.info(f"Transcription result: {result['text']}")
-        return result["text"]
+        text = result["text"]
+        logging.info(f"Transcription result: {text}")
+        return text
     except Exception as e:
         logging.error(f"Transcription error for file {filepath}: {e}")
         return ""
@@ -93,7 +96,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 try:
                     data = json.loads(message["text"])
                     logging.info(f"Received text message from client {client_id}: {data}")
-                    # (Handle JSON messages if needed)
+                    # (Handle any JSON commands if needed)
                 except Exception as e:
                     logging.error(f"Error processing text message from client {client_id}: {e}")
                     await websocket.send_json({"type": "error", "message": str(e)})
@@ -107,29 +110,44 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     async with aiofiles.open(filepath, 'wb') as f:
                         await f.write(binary_data)
                     logging.info(f"Saved audio file to {filepath}")
+
                     transcription = await process_audio_chunk(str(filepath))
+
+                    # Delete the file AFTER transcription is processed.
+                    try:
+                        os.remove(filepath)
+                        logging.info(f"Deleted file: {filepath}")
+                    except Exception as del_e:
+                        logging.error(f"Error deleting file {filepath}: {del_e}")
+
                     if transcription.strip():
-                        # Send transcription of this chunk
+                        # Send individual transcription to the client.
                         await websocket.send_json({
                             "type": "transcription",
                             "text": transcription
                         })
-                        logging.info(f"Fact-checking individual chunk for client {client_id}: {transcription}")
-                        # Fact-check the individual chunk (run as a background task)
-                        import asyncio
-                        asyncio.create_task(fact_checker.stream_fact_check(transcription, websocket))
+                        logging.info(f"Transcribed chunk for client {client_id}: {transcription}")
 
-                        # Update the running statement for this client
+                        # Append the transcription to the client's running statement.
                         current = client_statements.get(client_id, "")
                         new_running = (current + " " + transcription).strip()
                         client_statements[client_id] = new_running
                         logging.info(f"Updated running statement for client {client_id}: {new_running}")
 
-                        # Only re-run fact-checking on the running statement if it has changed
-                        if new_running != last_fact_checked_statement.get(client_id, ""):
-                            last_fact_checked_statement[client_id] = new_running
-                            logging.info(f"Fact-checking running statement for client {client_id}: {new_running}")
+                        # Evaluate if the running statement forms a complete fact statement.
+                        evaluation = await fact_checker.evaluate_fact_statement(new_running)
+                        logging.info(f"Evaluation result for client {client_id}: {evaluation}")
+
+                        if evaluation.get("complete"):
+                            # Launch fact-check process on the complete fact statement.
+                            import asyncio
                             asyncio.create_task(fact_checker.stream_fact_check(new_running, websocket))
+                            # Decide whether this fact continues the previous one or starts a new fact.
+                            if evaluation.get("action") == "new":
+                                logging.info(f"Starting new fact for client {client_id}. Resetting running statement.")
+                                client_statements[client_id] = ""
+                            else:
+                                logging.info(f"Continuing current fact for client {client_id}.")
                 except Exception as e:
                     logging.error(f"Error saving or processing binary audio for client {client_id}: {e}")
                     await websocket.send_json({"type": "error", "message": str(e)})
