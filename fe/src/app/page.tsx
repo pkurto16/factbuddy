@@ -89,7 +89,6 @@ export default function FactCheckPage() {
         console.log("[Recording] Sending raw binary audio chunk (length):", data.byteLength);
         wsRef.current?.sendMessage(data);
       });
-      // Set video preview using the full stream (video + audio)
       if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
         console.log("[Recording] Video element source set.");
@@ -121,12 +120,14 @@ export default function FactCheckPage() {
           <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
         </div>
 
-        {/* Expandable Fact-Check Overlay */}
+        {/* Live Fact-Check Overlay */}
         {isRecording && (factCheckStatus || currentFactCheck) && (
-            <FactCheckDisplay result={currentFactCheck} status={factCheckStatus} />
+            <div className="absolute bottom-4 left-4 z-30">
+              <FactCheckDisplay result={currentFactCheck} status={factCheckStatus} />
+            </div>
         )}
 
-        {/* Controls & History */}
+        {/* Controls & History Panel */}
         <div className="max-w-md mx-auto space-y-4 mt-4">
           <div className="flex gap-2">
             <Button

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, CheckCircle, Loader2, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, ArrowUp, ArrowDown } from "lucide-react";
 import type { FactCheckResult, FactCheckStatus, SearchResult, AnalysisUpdate } from "@/types/fact-check";
 
 // Helper to safely extract hostname from a URL string
@@ -23,18 +23,26 @@ interface FactCheckDisplayProps {
 export function FactCheckDisplay({ status, result, searchResult, analysisUpdate }: FactCheckDisplayProps) {
     const [expanded, setExpanded] = useState(false);
 
-    // Render nothing if there is no info to show.
     if (!status && !result && !searchResult && !analysisUpdate) return null;
+
+    let parsedCorrection;
+    if (result && result.correction) {
+        try {
+            parsedCorrection = JSON.parse(result.correction);
+        } catch (e) {
+            parsedCorrection = null;
+        }
+    }
 
     return (
         <div
-            className="cursor-pointer p-2 bg-black/80 text-white rounded shadow-lg transition-all duration-300"
+            className="cursor-pointer p-4 bg-black/80 text-white rounded shadow-lg transition-all duration-300 max-w-sm"
             onClick={() => setExpanded(!expanded)}
         >
             {result ? (
                 <>
                     <div className="flex items-center justify-between">
-                        <div className="text-sm font-medium truncate max-w-[200px]">
+                        <div className="text-sm font-medium truncate max-w-[150px]">
                             {result.statement}
                         </div>
                         <Badge variant="secondary" className="text-xs">
@@ -43,7 +51,21 @@ export function FactCheckDisplay({ status, result, searchResult, analysisUpdate 
                     </div>
                     {expanded && (
                         <div className="mt-2 text-xs">
-                            <div className="mb-1">{result.correction}</div>
+                            {parsedCorrection ? (
+                                <>
+                                    <div className="mb-1">
+                                        <strong>Summary:</strong> {parsedCorrection.summary}
+                                    </div>
+                                    <div className="mb-1">
+                                        <strong>Verdict:</strong> {parsedCorrection.verdict}
+                                    </div>
+                                    <div className="mb-1">
+                                        <strong>Credibility:</strong> {parsedCorrection.score}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="mb-1">{result.correction}</div>
+                            )}
                             {result.sources && result.sources.length > 0 && (
                                 <div>
                                     <div className="font-medium mb-1">Sources:</div>

@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -70,13 +71,15 @@ logging.info(f"Audio upload directory set to: {UPLOAD_DIR.resolve()}")
 
 async def process_audio_chunk(filepath: str) -> str:
     """Process audio chunk using Whisper and return the transcription.
-       The file deletion is handled by the caller.
+       File deletion is handled later in the endpoint.
     """
     try:
         if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
             logging.warning(f"Invalid or empty file: {filepath}")
             return ""
         logging.info(f"Processing audio file: {filepath}")
+        # Wait a bit longer (0.5 sec) to help ensure the file is complete.
+        await asyncio.sleep(0.5)
         result = model.transcribe(filepath)
         text = result["text"]
         logging.info(f"Transcription result: {text}")
@@ -96,7 +99,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 try:
                     data = json.loads(message["text"])
                     logging.info(f"Received text message from client {client_id}: {data}")
-                    # (Handle any JSON commands if needed)
+                    # Handle JSON commands if needed.
                 except Exception as e:
                     logging.error(f"Error processing text message from client {client_id}: {e}")
                     await websocket.send_json({"type": "error", "message": str(e)})
@@ -139,10 +142,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         logging.info(f"Evaluation result for client {client_id}: {evaluation}")
 
                         if evaluation.get("complete"):
-                            # Launch fact-check process on the complete fact statement.
-                            import asyncio
                             asyncio.create_task(fact_checker.stream_fact_check(new_running, websocket))
-                            # Decide whether this fact continues the previous one or starts a new fact.
                             if evaluation.get("action") == "new":
                                 logging.info(f"Starting new fact for client {client_id}. Resetting running statement.")
                                 client_statements[client_id] = ""
